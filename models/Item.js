@@ -7,25 +7,11 @@ const itemSchema = new mongoose.Schema({
     trim: true,
     unique: true
   },
-  unitPrice: {
+  price: {
     type: Number,
     required: true,
     min: 0
   },
-  quantity: {
-    type: Number,
-    required: true,
-    min: 0,
-    default: 0
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now
-  }
-});
+}, { timestamps: true });
 
 module.exports = mongoose.model('Item', itemSchema);
