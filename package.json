@@ -14,8 +14,7 @@
     "express": "^4.18.2",
     "express-async-handler": "^1.2.0",
     "html-pdf-node": "^1.0.8",
-    "mongoose": "^7.5.0",
-    "phantomjs": "^1.9.20"
+    "mongoose": "^7.5.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
