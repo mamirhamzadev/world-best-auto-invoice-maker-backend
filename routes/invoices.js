@@ -2,11 +2,10 @@ import express from 'express';
 const router = express.Router();
 import asyncHandler from 'express-async-handler';
 import Invoice from '../models/Invoice.js';
-import fs from 'fs';
-import path from 'path';
 import { isObjectIdOrHexString } from 'mongoose';
 import { generatePdf } from 'html-pdf-node';
-
+import chrome from 'chrome-aws-lambda';
+import puppeteer from 'puppeteer-core';
 
 // Get all invoices
 router.get('/', asyncHandler(async (req, res) => {
@@ -30,18 +29,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
     const invoice = await Invoice.findById(id).populate('customer').populate('items.item');
     if (!invoice) return res.send('<h3 style="color: red;">Invoice not found</h3>');
 
-
-    const htmlContent = generateInvoiceHTML(invoice);
-
-    // PDF options
-    const options = {
-        format: 'letter',
-        printBackground: true,
-    };
-    const file = { content: htmlContent };
-    const pdfBuffer = await generatePdf(file, options);
-
-    // Set response headers for PDF download
+    const pdfBuffer = await generateInvoicePDF(invoice);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'inline; filename=pos-invoice.pdf');
     res.send(pdfBuffer);
@@ -491,4 +479,51 @@ function generateInvoiceHTML(invoice) {
 </body>
 </html>
   `;
+}
+
+export async function generateInvoicePDF(invoice) {
+    let browser = null;
+
+    try {
+        // Get HTML from your template function
+        const htmlContent = generateInvoiceHTML(invoice); // Your existing function
+
+        // Launch browser
+        browser = await puppeteer.launch({
+            args: [...chrome.args, '--hide-scrollbars', '--disable-web-security'],
+            defaultViewport: chrome.defaultViewport,
+            executablePath: await chrome.executablePath,
+            headless: true,
+            ignoreHTTPSErrors: true,
+        });
+
+        const page = await browser.newPage();
+
+        // Set HTML content
+        await page.setContent(htmlContent, {
+            waitUntil: 'networkidle0',
+        });
+
+        // Generate PDF
+        const pdf = await page.pdf({
+            format: 'A4',
+            printBackground: true,
+            //   margin: {
+            //     top: '20px',
+            //     right: '20px',
+            //     bottom: '20px',
+            //     left: '20px'
+            //   }
+        });
+
+        return pdf;
+
+    } catch (error) {
+        console.error('PDF generation error:', error);
+        throw error;
+    } finally {
+        if (browser !== null) {
+            await browser.close();
+        }
+    }
 }
