@@ -1,11 +1,12 @@
-const express = require('express');
-const cors = require('cors');
-const dotenv = require('dotenv');
-const connectDB = require('./config/db');
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import { connectDB } from './config/db.js';
+import customerRoutes from './routes/customers.js'
+import itemsRoutes from './routes/items.js'
+import invoicesRoutes from './routes/invoices.js'
 
 dotenv.config();
-
-// Connect to MongoDB
 connectDB();
 
 const app = express();
@@ -13,11 +14,12 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Routes
-app.use('/api/customers', require('./routes/customers'));
-app.use('/api/items', require('./routes/items'));
-app.use('/api/invoices', require('./routes/invoices'));
+app.use('/api/customers', customerRoutes);
+app.use('/api/items', itemsRoutes);
+app.use('/api/invoices', invoicesRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

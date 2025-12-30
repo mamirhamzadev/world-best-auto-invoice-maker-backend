@@ -1,6 +1,11 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const invoiceItemSchema = new mongoose.Schema({
+  item: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Item',
+    required: true
+  },
   name: {
     type: String,
     required: true
@@ -10,7 +15,7 @@ const invoiceItemSchema = new mongoose.Schema({
     required: true,
     min: 1
   },
-  unitPrice: {
+  price: {
     type: Number,
     required: true,
     min: 0
@@ -20,31 +25,37 @@ const invoiceItemSchema = new mongoose.Schema({
     required: true,
     min: 0
   }
-});
+}, { _id: false });
 
 const invoiceSchema = new mongoose.Schema({
   invoiceNumber: {
     type: String,
-    required: true,
     unique: true
   },
-  vin: {
-    type: String,
-    trim: true
-  },
-  yearModel: {
-    type: String,
-    trim: true
+  vehicle: {
+    vin: {
+      type: String,
+      trim: true
+    },
+    model: {
+      type: String,
+      trim: true
+    }
   },
   customer: {
-    name: String,
-    phone: String,
-    address: String
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Customer',
+    required: true
   },
   items: [invoiceItemSchema],
-  subtotal: {
+  total_amount: {
     type: Number,
     required: true,
+    min: 0
+  },
+  total_discounted_amount: {
+    type: Number,
+    default: 0,
     min: 0
   },
   discount: {
@@ -53,19 +64,9 @@ const invoiceSchema = new mongoose.Schema({
     min: 0,
     max: 100
   },
-  discountAmount: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
   tax: {
     type: Number,
     default: 8,
-    min: 0
-  },
-  taxAmount: {
-    type: Number,
-    default: 0,
     min: 0
   },
   deposit: {
@@ -73,42 +74,33 @@ const invoiceSchema = new mongoose.Schema({
     default: 0,
     min: 0
   },
-  refundAmount: {
+  refund_amount: {
     type: Number,
     default: 0,
     min: 0
   },
-  refundReason: {
+  refund_notes: {
     type: String,
     trim: true
-  },
-  grandTotal: {
-    type: Number,
-    required: true,
-    min: 0
   },
   notes: {
     type: String,
     trim: true
   },
-  paymentStatus: {
+  payment_status: {
     type: String,
     enum: ['Paid', 'Unpaid'],
     default: 'Paid'
   },
-  paymentMethod: {
+  payment_method: {
     type: String,
     enum: ['Cash', 'Card', 'Cheque'],
     default: 'Cash'
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
   }
-});
+}, { timestamps: true });
 
 // Generate invoice number before save
-invoiceSchema.pre('save', async function(next) {
+invoiceSchema.pre('save', async function (next) {
   if (!this.invoiceNumber) {
     const count = await this.constructor.countDocuments();
     const date = new Date();
@@ -119,4 +111,4 @@ invoiceSchema.pre('save', async function(next) {
   next();
 });
 
-module.exports = mongoose.model('Invoice', invoiceSchema);
+export default mongoose.model('Invoice', invoiceSchema);

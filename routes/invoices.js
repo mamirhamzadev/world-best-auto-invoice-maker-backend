@@ -1,101 +1,494 @@
-const express = require('express');
+import express from 'express';
 const router = express.Router();
-const asyncHandler = require('express-async-handler');
-const Invoice = require('../models/Invoice');
-const Item = require('../models/Item');
+import asyncHandler from 'express-async-handler';
+import Invoice from '../models/Invoice.js';
+import fs from 'fs';
+import path from 'path';
+import { isObjectIdOrHexString } from 'mongoose';
+import { generatePdf } from 'html-pdf-node';
+
 
 // Get all invoices
 router.get('/', asyncHandler(async (req, res) => {
-  const invoices = await Invoice.find().sort({ createdAt: -1 });
-  res.json(invoices);
+    const invoices = await Invoice.find().sort({ createdAt: -1 });
+    res.json(invoices);
 }));
 
 // Create new invoice
 router.post('/', asyncHandler(async (req, res) => {
-  const {
-    vin,
-    yearModel,
-    customer,
-    items,
-    discount,
-    tax,
-    deposit,
-    refundAmount,
-    refundReason,
-    notes,
-    paymentStatus,
-    paymentMethod
-  } = req.body;
-
-  // Calculate totals
-  const subtotal = items.reduce((sum, item) => sum + item.total, 0);
-  const discountAmount = subtotal * (discount / 100);
-  const taxableAmount = subtotal - discountAmount;
-  const taxAmount = taxableAmount * (tax / 100);
-  const grandTotal = taxableAmount + taxAmount - deposit - refundAmount;
-
-  // Update item quantities in inventory
-  for (const item of items) {
-    const existingItem = await Item.findOne({ name: item.name });
-    if (existingItem) {
-      existingItem.quantity -= item.quantity;
-      existingItem.updatedAt = Date.now();
-      await existingItem.save();
-    }
-  }
-
-  const invoice = await Invoice.create({
-    vin,
-    yearModel,
-    customer,
-    items,
-    subtotal,
-    discount,
-    discountAmount,
-    tax,
-    taxAmount,
-    deposit,
-    refundAmount,
-    refundReason,
-    grandTotal,
-    notes,
-    paymentStatus,
-    paymentMethod
-  });
-
-  res.status(201).json(invoice);
+    const payload = req.body;
+    const invoice = await Invoice.create(payload);
+    if (invoice)
+        return res.json({ message: "Invoice created successfully", invoiceId: invoice._id });
+    return res.status(400).json({ message: "Invoice creation failed" });
 }));
 
 // Get single invoice
 router.get('/:id', asyncHandler(async (req, res) => {
-  const invoice = await Invoice.findById(req.params.id);
-  if (!invoice) {
-    res.status(404);
-    throw new Error('Invoice not found');
-  }
-  res.json(invoice);
+    const id = req.params.id;
+    if (!isObjectIdOrHexString(id)) return res.send('<h3 style="color: red;">Invoice not found</h3>');
+    const invoice = await Invoice.findById(id).populate('customer').populate('items.item');
+    if (!invoice) return res.send('<h3 style="color: red;">Invoice not found</h3>');
+
+
+    const htmlContent = generateInvoiceHTML(invoice);
+
+    // PDF options
+    const options = {
+        format: 'letter',
+        printBackground: true,
+    };
+    const file = { content: htmlContent };
+    const pdfBuffer = await generatePdf(file, options);
+
+    // Set response headers for PDF download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename=pos-invoice.pdf');
+    res.send(pdfBuffer);
 }));
 
-// Delete invoice
-router.delete('/:id', asyncHandler(async (req, res) => {
-  const invoice = await Invoice.findById(req.params.id);
-  if (!invoice) {
-    res.status(404);
-    throw new Error('Invoice not found');
-  }
-  
-  // Restore item quantities
-  for (const item of invoice.items) {
-    const existingItem = await Item.findOne({ name: item.name });
-    if (existingItem) {
-      existingItem.quantity += item.quantity;
-      existingItem.updatedAt = Date.now();
-      await existingItem.save();
+router.get('/search', asyncHandler(async (req, res) => {
+    const query = req.query.q;
+    const invoices = await Invoice.find({
+        $or: [
+            { invoiceNumber: { $regex: query, $options: 'i' } },
+            { customerName: { $regex: query, $options: 'i' } },
+            { vehicleVIN: { $regex: query, $options: 'i' } },
+        ],
+    }).sort({ createdAt: -1 });
+    res.json(invoices);
+}));
+
+export default router;
+
+
+function generateInvoiceHTML(invoice) {
+    const formatCurrency = (amount) => {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD'
+        }).format(amount);
+    };
+
+    // Calculate totals
+    const subtotal = invoice.items.reduce((sum, item) => sum + item.total, 0);
+    const discountAmount = subtotal * (invoice.discount / 100);
+    const amountAfterDiscount = subtotal - discountAmount;
+    const taxAmount = amountAfterDiscount * (invoice.tax / 100);
+    const grandTotal = amountAfterDiscount + taxAmount - invoice.deposit;
+
+    // Generate items rows HTML
+    let itemsRows = '';
+    invoice.items.forEach(item => {
+        itemsRows += `
+      <tr>
+        <td>${item.name}</td>
+        <td>${item.quantity}</td>
+        <td>${formatCurrency(item.price)}</td>
+        <td>${formatCurrency(item.total)}</td>
+      </tr>
+    `;
+    });
+
+    // Generate conditional rows
+    // In your generateInvoiceHTML function, update the discountRow generation:
+    let discountRow = '';
+    if (invoice.discount > 0) {
+        discountRow = `
+    <div class="total-row dashed-border discount-row">
+      <span class="label">Discount (${invoice.discount}%)</span>
+      <span class="amount">-${formatCurrency(discountAmount)}</span>
+    </div>
+  `;
     }
-  }
-  
-  await invoice.deleteOne();
-  res.json({ message: 'Invoice removed' });
-}));
 
-module.exports = router;
+    // And deposit row:
+    let depositRow = '';
+    if (invoice.deposit > 0) {
+        depositRow = `
+    <div class="total-row dashed-border">
+      <span class="label">Deposit</span>
+      <span class="amount">-${formatCurrency(invoice.deposit)}</span>
+    </div>
+  `;
+    }
+
+    // Format date
+    const invoiceDate = new Date(invoice.createdAt).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    });
+    // Return complete HTML
+    return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Invoice ${invoice.invoiceNumber}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .invoice {
+            margin: 0 auto;
+            background: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(90deg, #3b82f6, #6366f1);
+            color: #fff;
+            padding: 20px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .company-info {
+            flex: 1;
+        }
+        .company-info h1 {
+            margin: 0 0 5px 0;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .company-info p {
+            margin: 2px 0;
+            font-size: 12px;
+        }
+        .invoice-info {
+            text-align: right;
+            background: rgba(255, 255, 255, 0.15);
+            padding: 10px;
+            border-radius: 6px;
+            min-width: 250px;
+        }
+        .info-row {
+          margin-bottom: 5px;
+          display: flex;
+          justify-content: space-between;
+          font-size: 13px;
+        }
+        .info-label {
+          font-weight: 600;
+          opacity: 0.9;
+          margin-right: 15px;
+          }
+        .info-value {
+          font-weight: 500;
+        }
+        .content-section {
+            padding: 0px 40px;
+        }
+        .section-title {
+            color: #374151;
+            font-size: 15px;
+            margin-bottom: 5px;
+        }
+        .bill-to-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 25px;
+            padding: 15px;
+            background: #f9fafb;
+            border-radius: 8px;
+        }
+        .bill-item {
+            display: flex;
+            flex-direction: column;
+        }
+        .bill-label {
+            font-weight: 600;
+            color: #4b5563;
+            font-size: 13px;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .bill-value {
+            color: #111827;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th {
+            background: #f3f4f6;
+            color: #374151;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+        th, td {
+            padding: 10px 16px;
+            text-align: left;
+            font-size: 12px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        td{
+          padding: 5px 16px;
+        }
+        tbody tr:hover {
+            background-color: #f9fafb;
+        }
+        /* FIXED TOTALS SECTION STYLES */
+        .totals {
+            background: #ffffff;
+            padding: 20px 0px;
+        }
+        .totals-header {
+            font-size: 15px;
+            font-weight: 700;
+            color: #374151;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 2px solid #3b82f6;
+        }
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            align-items: center;
+        }
+        .total-row .label {
+            font-weight: 500;
+            color: #4b5563;
+            font-size: 12px;
+        }
+        .total-row .amount {
+            font-weight: 600;
+            color: #111827;
+            font-size: 12px;
+            text-align: right;
+            min-width: 120px;
+        }
+        .discount-row .amount {
+            color: #dc2626;
+        }
+        .dashed-border {
+            border-bottom: 1px dashed #e5e7eb;
+        }
+        .grand-total {
+            margin-top: 5px;
+            background: linear-gradient(90deg, rgba(37, 99, 235, 0.05) 0%, rgba(37, 99, 235, 0.02) 100%);
+            padding: 10px;
+            border-radius: 8px;
+        }
+        .grand-total .label {
+            font-size: 15px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #374151;
+        }
+        .grand-total .amount {
+            font-size: 20px;
+            font-weight: 800;
+            color: #2563eb;
+        }
+        /* END TOTALS SECTION STYLES */
+        .paid {
+            color: #059669;
+            background: #d1fae5;
+        }
+        .unpaid {
+            color: #dc2626;
+            background: #fee2e2;
+        }
+        .payment-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+            padding: 25px;
+            background: #f9fafb;
+            border-radius: 8px;
+            align-items: center;
+        }
+        .payment-item {
+            display: flex;
+            flex-direction: column;
+            min-height: 60px;
+            justify-content: center;
+        }
+        .payment-label {
+            font-weight: 600;
+            color: #4b5563;
+            font-size: 13px;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .payment-value {
+            color: #111827;
+            font-size: 15px;
+            font-weight: 500;
+        }
+        .refund-item {
+            display: flex;
+            flex-direction: column;
+            min-height: 60px;
+            justify-content: center;
+        }
+        .footer {
+            background: #111827;
+            color: #d1d5db;
+            text-align: center;
+            padding: 15px;
+            margin-top: 15px;
+        }
+        .footer h3 {
+          color: #ffffff;
+          font-size: 15px;
+          margin:0;
+          margin-bottom: 5px;  
+          }
+        .footer p {
+          opacity: 0.8;
+          font-size: 12px;
+          margin: 0;  
+        }
+        .notes-section {
+            padding: 10px;
+            background: #fef3c7;
+            border-radius: 6px;
+            border-left: 4px solid #d97706;
+        }
+        .notes-section p {
+            font-size: 12px;
+            margin: 5px 0;
+        }
+        @media print {
+            body {
+                padding: 0;
+                background: #fff;
+            }
+            .invoice {
+                box-shadow: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="invoice">
+        <!-- HEADER SECTION -->
+        <div class="header">
+            <div class="company-info">
+                <h1>WORLDS BEST AUTO LLC</h1>
+                <p>247 North Main Street, Statesboro, GA</p>
+                <p>91 26817671 | contact@worldsbestauto.com</p>
+            </div>
+            
+            <div class="invoice-info">
+                <div class="info-row">
+                    <span class="info-label">Invoice #:</span>
+                    <span class="info-value">${invoice.invoiceNumber}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Date:</span>
+                    <span class="info-value">${invoiceDate}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">VIN:</span>
+                    <span class="info-value">${invoice.vehicle?.vin || 'N/A'}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Vehicle:</span>
+                    <span class="info-value">${invoice.vehicle?.model || 'N/A'}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- CONTENT SECTION -->
+        <div class="content-section">
+            <h3 class="section-title">Customer Information</h3>
+            <div class="bill-to-row">
+                <div class="bill-item">
+                    <span class="bill-label">Customer Name</span>
+                    <span class="bill-value">${invoice.customer.name || 'N/A'}</span>
+                </div>
+                <div class="bill-item">
+                    <span class="bill-label">Phone</span>
+                    <span class="bill-value">${invoice.customer.phone || 'N/A'}</span>
+                </div>
+                <div class="bill-item">
+                    <span class="bill-label">Address</span>
+                    <span class="bill-value">${invoice.customer.address || 'N/A'}</span>
+                </div>
+            </div>
+
+            <!-- ITEMS TABLE -->
+            <h3 class="section-title">Services & Parts</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Description</th>
+                        <th>Quantity</th>
+                        <th>Unit Price</th>
+                        <th>Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${itemsRows}
+                </tbody>
+            </table>
+
+            <!-- FIXED TOTALS SECTION -->
+            <div class="totals">
+                <div class="totals-header">Invoice Summary</div>
+                
+                <div class="total-row dashed-border">
+                    <span class="label">Method</span>
+                    <span class="amount">${invoice.payment_method}</span>
+                </div>
+                
+                <div class="total-row dashed-border ${invoice.payment_status.toLowerCase()}">
+                    <span class="label">Status</span>
+                    <span class="amount">${invoice.payment_status}</span>
+                </div>
+
+                <div class="total-row dashed-border">
+                    <span class="label">Subtotal</span>
+                    <span class="amount">${formatCurrency(subtotal)}</span>
+                </div>
+                
+                ${discountRow}
+                
+                <div class="total-row dashed-border">
+                    <span class="label">Tax (${invoice.tax}%)</span>
+                    <span class="amount">${formatCurrency(taxAmount)}</span>
+                </div>
+                
+                ${depositRow}
+                
+                <div class="total-row grand-total">
+                    <span class="label">Total Amount Due</span>
+                    <span class="amount">${formatCurrency(grandTotal)}</span>
+                </div>
+            </div>
+
+            <!-- NOTES SECTION -->
+            ${invoice.notes || invoice.refund_notes ? `
+            <div class="notes-section">
+                ${invoice.notes ? `<p><strong>Notes:</strong> ${invoice.notes}</p>` : ''}
+                ${invoice.refund_notes ? `<p><strong>Refund Notes:</strong> ${invoice.refund_notes}</p>` : ''}
+            </div>
+            ` : ''}
+        </div>
+
+        <!-- FOOTER -->
+        <div class="footer">
+            <h3>Thank you for your business!</h3>
+            <p>This is a computer-generated invoice. No signature required.</p>
+        </div>
+    </div>
+</body>
+</html>
+  `;
+}

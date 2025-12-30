@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Invoice</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f3f4f6;
+            padding: 20px;
+        }
+
+        .invoice {
+            max-width: 900px;
+            margin: auto;
+            background: #ffffff;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #e5e7eb;
+        }
+
+        .header {
+            background: linear-gradient(90deg, #3b82f6, #6366f1);
+            color: #fff;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .meta {
+            background: #f9fafb;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            padding: 20px;
+            font-size: 14px;
+        }
+
+        .section {
+            padding: 25px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th,
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e5e7eb;
+            text-align: left;
+        }
+
+        th {
+            background: #f3f4f6;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        .totals {
+            background: #f9fafb;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .grand {
+            font-size: 20px;
+            font-weight: bold;
+            color: #2563eb;
+        }
+
+        .paid {
+            color: green;
+            font-weight: bold;
+        }
+
+        .unpaid {
+            color: red;
+            font-weight: bold;
+        }
+
+        .footer {
+            background: #111827;
+            color: #d1d5db;
+            text-align: center;
+            padding: 30px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="invoice">
+
+        <!-- HEADER -->
+        <div class="header">
+            <h1>WORLDS BEST AUTO LLC.</h1>
+            <p>247 North Main Street, Statesboro, GA</p>
+            <p>Phone: 91 26817671 | Email: contact@worldsbestauto.com</p>
+        </div>
+
+        <!-- META -->
+        <div class="meta">
+            <div>
+                <strong>Invoice #</strong><br />
+                {{invoice_number}}
+            </div>
+            <div>
+                <strong>Date</strong><br />
+                {{invoice_date}}
+            </div>
+            <div>
+                <strong>Vehicle</strong><br />
+                VIN: {{vin}} | {{year_model}}
+            </div>
+        </div>
+
+        <!-- BILL TO -->
+        <div class="section">
+            <h3>Bill To</h3>
+            <p><strong>Name:</strong> {{customer_name}}</p>
+            <p><strong>Phone:</strong> {{customer_phone}}</p>
+            <p><strong>Address:</strong> {{customer_address}}</p>
+        </div>
+
+        <!-- ITEMS -->
+        <div class="section">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Description</th>
+                        <th>Qty</th>
+                        <th>Unit Price</th>
+                        <th>Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{items_rows}}
+                </tbody>
+            </table>
+
+            <!-- TOTALS -->
+            <div class="totals">
+                <div class="row">
+                    <span>Subtotal</span>
+                    <span>${{subtotal}}</span>
+                </div>
+
+                {{discount_row}}
+
+                <div class="row">
+                    <span>Tax ({{tax}}%)</span>
+                    <span>${{tax_amount}}</span>
+                </div>
+
+                {{deposit_row}}
+
+                <div class="row grand">
+                    <span>Grand Total</span>
+                    <span>${{grand_total}}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- PAYMENT -->
+        <div class="section">
+            <p>
+                <strong>Status:</strong>
+                <span class="{{payment_class}}">{{payment_status}}</span>
+            </p>
+            <p><strong>Method:</strong> {{payment_method}}</p>
+        </div>
+
+        <!-- FOOTER -->
+        <div class="footer">
+            <h3>Thank you for your business!</h3>
+            <p>Please make all checks payable to WORLDS BEST AUTO LLC.</p>
+            <p>This is a computer-generated invoice.</p>
+        </div>
+
+    </div>
+
+</body>
+
+</html>

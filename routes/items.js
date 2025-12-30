@@ -1,7 +1,7 @@
-const express = require('express');
+import express from 'express';
 const router = express.Router();
-const asyncHandler = require('express-async-handler');
-const Item = require('../models/Item');
+import asyncHandler from 'express-async-handler';
+import Item from '../models/Item.js';
 
 // Get all items
 router.get('/', asyncHandler(async (req, res) => {
@@ -35,20 +35,18 @@ router.post('/', asyncHandler(async (req, res) => {
 }));
 
 // Update item quantity
-router.patch('/:id', asyncHandler(async (req, res) => {
-  const { quantity } = req.body;
+router.patch('/', asyncHandler(async (req, res) => {
+  const { _id, name, price } = req.body;
 
-  const item = await Item.findById(req.params.id);
-  if (!item) {
-    res.status(404);
-    throw new Error('Item not found');
-  }
-
-  item.quantity = quantity;
-  item.updatedAt = Date.now();
+  const existingItem = await Item.findOne({ name, _id: { $ne: _id } });
+  if (existingItem)
+    return res.status(400).json({ message: 'Another item with this name already exists' });
+  const item = await Item.findById(_id);
+  if (!item) return res.status(404).json({ message: 'Item not found' });
+  item.name = name;
+  item.price = price;
   await item.save();
-
   res.json(item);
 }));
 
-module.exports = router;
+export default router;

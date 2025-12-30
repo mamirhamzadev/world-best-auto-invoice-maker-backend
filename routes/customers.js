@@ -1,7 +1,7 @@
-const express = require('express');
+import express from 'express';
 const router = express.Router();
-const asyncHandler = require('express-async-handler');
-const Customer = require('../models/Customer');
+import asyncHandler from 'express-async-handler';
+import Customer from '../models/Customer.js';
 
 // Get all customers
 router.get('/', asyncHandler(async (req, res) => {
@@ -42,4 +42,4 @@ router.post('/', asyncHandler(async (req, res) => {
   res.status(500).json({ message: 'Customer cannot be created.' });
 }));
 
-module.exports = router;
+export default router;
