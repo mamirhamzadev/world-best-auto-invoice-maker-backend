@@ -3,72 +3,74 @@ const router = express.Router();
 import asyncHandler from 'express-async-handler';
 import Invoice from '../models/Invoice.js';
 import { isObjectIdOrHexString } from 'mongoose';
-import { generatePdf } from 'html-pdf-node';
-import chrome from 'chrome-aws-lambda';
-import puppeteer from 'puppeteer-core';
 
 // Get all invoices
 router.get('/', asyncHandler(async (req, res) => {
-    const invoices = await Invoice.find().sort({ createdAt: -1 });
-    res.json(invoices);
+  const invoices = await Invoice.find().sort({ createdAt: -1 });
+  res.json(invoices);
 }));
 
 // Create new invoice
 router.post('/', asyncHandler(async (req, res) => {
-    const payload = req.body;
-    const invoice = await Invoice.create(payload);
-    if (invoice)
-        return res.json({ message: "Invoice created successfully", invoiceId: invoice._id });
-    return res.status(400).json({ message: "Invoice creation failed" });
+  const payload = req.body;
+  const invoice = await Invoice.create(payload);
+  if (invoice)
+    return res.json({ message: "Invoice created successfully", invoiceId: invoice._id });
+  return res.status(400).json({ message: "Invoice creation failed" });
 }));
 
 // Get single invoice
 router.get('/:id', asyncHandler(async (req, res) => {
-    const id = req.params.id;
-    if (!isObjectIdOrHexString(id)) return res.send('<h3 style="color: red;">Invoice not found</h3>');
-    const invoice = await Invoice.findById(id).populate('customer').populate('items.item');
-    if (!invoice) return res.send('<h3 style="color: red;">Invoice not found</h3>');
+  const id = req.params.id;
+  if (!isObjectIdOrHexString(id || "")) return res.status(404).json({ message: "Invoice not found" });
 
-    const pdfBuffer = await generateInvoicePDF(invoice);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename=pos-invoice.pdf');
-    res.send(pdfBuffer);
+  const invoice = await Invoice.findById(id).populate('customer').populate('items.item');
+  res.json(invoice);
+
+  // if (!isObjectIdOrHexString(id)) return res.send('<h3 style="color: red;">Invoice not found</h3>');
+  // const invoice = await Invoice.findById(id).populate('customer').populate('items.item');
+  // if (!invoice) return res.send('<h3 style="color: red;">Invoice not found</h3>');
+
+  // const pdfBuffer = await generateInvoicePDF(invoice);
+  // res.setHeader('Content-Type', 'application/pdf');
+  // res.setHeader('Content-Disposition', 'inline; filename=pos-invoice.pdf');
+  // res.send(pdfBuffer);
 }));
 
 router.get('/search', asyncHandler(async (req, res) => {
-    const query = req.query.q;
-    const invoices = await Invoice.find({
-        $or: [
-            { invoiceNumber: { $regex: query, $options: 'i' } },
-            { customerName: { $regex: query, $options: 'i' } },
-            { vehicleVIN: { $regex: query, $options: 'i' } },
-        ],
-    }).sort({ createdAt: -1 });
-    res.json(invoices);
+  const query = req.query.q;
+  const invoices = await Invoice.find({
+    $or: [
+      { invoiceNumber: { $regex: query, $options: 'i' } },
+      { customerName: { $regex: query, $options: 'i' } },
+      { vehicleVIN: { $regex: query, $options: 'i' } },
+    ],
+  }).sort({ createdAt: -1 });
+  res.json(invoices);
 }));
 
 export default router;
 
 
 function generateInvoiceHTML(invoice) {
-    const formatCurrency = (amount) => {
-        return new Intl.NumberFormat('en-US', {
-            style: 'currency',
-            currency: 'USD'
-        }).format(amount);
-    };
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD'
+    }).format(amount);
+  };
 
-    // Calculate totals
-    const subtotal = invoice.items.reduce((sum, item) => sum + item.total, 0);
-    const discountAmount = subtotal * (invoice.discount / 100);
-    const amountAfterDiscount = subtotal - discountAmount;
-    const taxAmount = amountAfterDiscount * (invoice.tax / 100);
-    const grandTotal = amountAfterDiscount + taxAmount - invoice.deposit;
+  // Calculate totals
+  const subtotal = invoice.items.reduce((sum, item) => sum + item.total, 0);
+  const discountAmount = subtotal * (invoice.discount / 100);
+  const amountAfterDiscount = subtotal - discountAmount;
+  const taxAmount = amountAfterDiscount * (invoice.tax / 100);
+  const grandTotal = amountAfterDiscount + taxAmount - invoice.deposit;
 
-    // Generate items rows HTML
-    let itemsRows = '';
-    invoice.items.forEach(item => {
-        itemsRows += `
+  // Generate items rows HTML
+  let itemsRows = '';
+  invoice.items.forEach(item => {
+    itemsRows += `
       <tr>
         <td>${item.name}</td>
         <td>${item.quantity}</td>
@@ -76,39 +78,39 @@ function generateInvoiceHTML(invoice) {
         <td>${formatCurrency(item.total)}</td>
       </tr>
     `;
-    });
+  });
 
-    // Generate conditional rows
-    // In your generateInvoiceHTML function, update the discountRow generation:
-    let discountRow = '';
-    if (invoice.discount > 0) {
-        discountRow = `
+  // Generate conditional rows
+  // In your generateInvoiceHTML function, update the discountRow generation:
+  let discountRow = '';
+  if (invoice.discount > 0) {
+    discountRow = `
     <div class="total-row dashed-border discount-row">
       <span class="label">Discount (${invoice.discount}%)</span>
       <span class="amount">-${formatCurrency(discountAmount)}</span>
     </div>
   `;
-    }
+  }
 
-    // And deposit row:
-    let depositRow = '';
-    if (invoice.deposit > 0) {
-        depositRow = `
+  // And deposit row:
+  let depositRow = '';
+  if (invoice.deposit > 0) {
+    depositRow = `
     <div class="total-row dashed-border">
       <span class="label">Deposit</span>
       <span class="amount">-${formatCurrency(invoice.deposit)}</span>
     </div>
   `;
-    }
+  }
 
-    // Format date
-    const invoiceDate = new Date(invoice.createdAt).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-    });
-    // Return complete HTML
-    return `
+  // Format date
+  const invoiceDate = new Date(invoice.createdAt).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+  // Return complete HTML
+  return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -481,49 +483,220 @@ function generateInvoiceHTML(invoice) {
   `;
 }
 
-export async function generateInvoicePDF(invoice) {
-    let browser = null;
+// utils/pdfGenerator-simple.js
+import { PDFDocument, rgb } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
+// Simplified working PDF generator
+async function generateInvoicePDF(invoice) {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]); // A4
 
-    try {
-        // Get HTML from your template function
-        const htmlContent = generateInvoiceHTML(invoice); // Your existing function
+  const font = await pdfDoc.embedFont('Helvetica');
+  const boldFont = await pdfDoc.embedFont('Helvetica-Bold');
 
-        // Launch browser
-        browser = await puppeteer.launch({
-            args: [...chrome.args, '--hide-scrollbars', '--disable-web-security'],
-            defaultViewport: chrome.defaultViewport,
-            executablePath: await chrome.executablePath,
-            headless: true,
-            ignoreHTTPSErrors: true,
-        });
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD'
+    }).format(amount);
+  };
 
-        const page = await browser.newPage();
+  // Calculate totals
+  const subtotal = invoice.items.reduce((sum, item) => sum + item.total, 0);
+  const discountAmount = subtotal * (invoice.discount / 100);
+  const taxAmount = (subtotal - discountAmount) * (invoice.tax / 100);
+  const grandTotal = subtotal - discountAmount + taxAmount - invoice.deposit;
 
-        // Set HTML content
-        await page.setContent(htmlContent, {
-            waitUntil: 'networkidle0',
-        });
+  const invoiceDate = new Date(invoice.createdAt).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
 
-        // Generate PDF
-        const pdf = await page.pdf({
-            format: 'A4',
-            printBackground: true,
-            //   margin: {
-            //     top: '20px',
-            //     right: '20px',
-            //     bottom: '20px',
-            //     left: '20px'
-            //   }
-        });
+  let y = 800;
 
-        return pdf;
+  // Header
+  page.drawText('WORLDS BEST AUTO LLC', {
+    x: 50, y: y, size: 20, font: boldFont, color: rgb(0, 0.4, 0.8)
+  });
+  y -= 25;
 
-    } catch (error) {
-        console.error('PDF generation error:', error);
-        throw error;
-    } finally {
-        if (browser !== null) {
-            await browser.close();
-        }
+  page.drawText('247 North Main Street, Statesboro, GA', {
+    x: 50, y: y, size: 12, font, color: rgb(0, 0, 0)
+  });
+  y -= 15;
+
+  page.drawText('91 26817671 | contact@worldsbestauto.com', {
+    x: 50, y: y, size: 12, font, color: rgb(0, 0, 0)
+  });
+  y -= 30;
+
+  // Invoice details
+  page.drawText(`Invoice #: ${invoice.invoiceNumber}`, {
+    x: 400, y: 775, size: 12, font: boldFont, color: rgb(0, 0, 0)
+  });
+
+  page.drawText(`Date: ${invoiceDate}`, {
+    x: 400, y: 755, size: 12, font, color: rgb(0, 0, 0)
+  });
+
+  page.drawText(`VIN: ${invoice.vehicle?.vin || 'N/A'}`, {
+    x: 400, y: 735, size: 12, font, color: rgb(0, 0, 0)
+  });
+
+  page.drawText(`Vehicle: ${invoice.vehicle?.model || 'N/A'}`, {
+    x: 400, y: 715, size: 12, font, color: rgb(0, 0, 0)
+  });
+
+  y = 650;
+
+  // Customer Information
+  page.drawText('Customer Information', {
+    x: 50, y: y, size: 16, font: boldFont, color: rgb(0, 0, 0)
+  });
+  y -= 30;
+
+  page.drawText(`Name: ${invoice.customer.name || 'N/A'}`, {
+    x: 50, y: y, size: 12, font, color: rgb(0, 0, 0)
+  });
+  y -= 20;
+
+  page.drawText(`Phone: ${invoice.customer.phone || 'N/A'}`, {
+    x: 50, y: y, size: 12, font, color: rgb(0, 0, 0)
+  });
+  y -= 20;
+
+  page.drawText(`Address: ${invoice.customer.address || 'N/A'}`, {
+    x: 50, y: y, size: 12, font, color: rgb(0, 0, 0)
+  });
+  y -= 40;
+
+  // Items Table Header
+  page.drawText('Services & Parts', {
+    x: 50, y: y, size: 16, font: boldFont, color: rgb(0, 0, 0)
+  });
+  y -= 30;
+
+  // Draw table headers
+  page.drawText('Description', { x: 50, y, size: 12, font: boldFont });
+  page.drawText('Qty', { x: 350, y, size: 12, font: boldFont });
+  page.drawText('Price', { x: 400, y, size: 12, font: boldFont });
+  page.drawText('Total', { x: 480, y, size: 12, font: boldFont });
+
+  y -= 20;
+  page.drawLine({
+    start: { x: 50, y },
+    end: { x: 550, y },
+    thickness: 1,
+    color: rgb(0, 0, 0),
+  });
+  y -= 20;
+
+  // Items
+  invoice.items.forEach(item => {
+    // Wrap long descriptions
+    const description = item.name.length > 40 ? item.name.substring(0, 40) + '...' : item.name;
+
+    page.drawText(description, { x: 50, y, size: 10, font });
+    page.drawText(item.quantity.toString(), { x: 350, y, size: 10, font });
+    page.drawText(formatCurrency(item.price), { x: 400, y, size: 10, font });
+    page.drawText(formatCurrency(item.total), { x: 480, y, size: 10, font });
+
+    y -= 20;
+  });
+
+  y -= 30;
+
+  // Totals
+  page.drawText('Invoice Summary', {
+    x: 50, y, size: 16, font: boldFont, color: rgb(0, 0, 0)
+  });
+  y -= 30;
+
+  page.drawText('Subtotal:', { x: 350, y, size: 12, font });
+  page.drawText(formatCurrency(subtotal), { x: 480, y, size: 12, font: boldFont });
+  y -= 20;
+
+  if (invoice.discount > 0) {
+    page.drawText(`Discount (${invoice.discount}%):`, { x: 350, y, size: 12, font });
+    page.drawText(`-${formatCurrency(discountAmount)}`, { x: 480, y, size: 12, font, color: rgb(1, 0, 0) });
+    y -= 20;
+  }
+
+  page.drawText(`Tax (${invoice.tax}%):`, { x: 350, y, size: 12, font });
+  page.drawText(formatCurrency(taxAmount), { x: 480, y, size: 12, font });
+  y -= 20;
+
+  if (invoice.deposit > 0) {
+    page.drawText('Deposit:', { x: 350, y, size: 12, font });
+    page.drawText(`-${formatCurrency(invoice.deposit)}`, { x: 480, y, size: 12, font, color: rgb(1, 0, 0) });
+    y -= 20;
+  }
+
+  y -= 10;
+  page.drawLine({
+    start: { x: 350, y },
+    end: { x: 550, y },
+    thickness: 2,
+    color: rgb(0, 0, 0),
+  });
+  y -= 20;
+
+  page.drawText('Total Amount Due:', { x: 350, y, size: 14, font: boldFont });
+  page.drawText(formatCurrency(grandTotal), {
+    x: 480, y, size: 18, font: boldFont, color: rgb(0, 0.4, 0.8)
+  });
+  y -= 40;
+
+  // Payment Info
+  page.drawText(`Payment Status: ${invoice.payment_status}`, {
+    x: 50, y, size: 12, font
+  });
+  y -= 20;
+
+  page.drawText(`Payment Method: ${invoice.payment_method}`, {
+    x: 50, y, size: 12, font
+  });
+  y -= 20;
+
+  if (invoice.deposit > 0) {
+    page.drawText(`Deposit Paid: ${formatCurrency(invoice.deposit)}`, {
+      x: 50, y, size: 12, font
+    });
+    y -= 20;
+  }
+
+  if (invoice.refund_amount > 0) {
+    page.drawText(`Refund Amount: ${formatCurrency(invoice.refund_amount)}`, {
+      x: 50, y, size: 12, font
+    });
+    y -= 20;
+
+    if (invoice.refund_notes) {
+      page.drawText(`Refund Notes: ${invoice.refund_notes}`, {
+        x: 50, y, size: 10, font, color: rgb(0.5, 0.5, 0.5)
+      });
+      y -= 20;
     }
+  }
+
+  // Notes
+  if (invoice.notes) {
+    y -= 20;
+    page.drawText('Notes:', { x: 50, y, size: 12, font: boldFont });
+    y -= 15;
+    page.drawText(invoice.notes, { x: 50, y, size: 10, font });
+  }
+
+  // Footer
+  page.drawText('Thank you for your business!', {
+    x: 200, y: 50, size: 14, font: boldFont, color: rgb(0, 0, 0)
+  });
+
+  page.drawText('This is a computer-generated invoice. No signature required.', {
+    x: 150, y: 30, size: 10, font, color: rgb(0.5, 0.5, 0.5)
+  });
+
+  const pdfBytes = await pdfDoc.save();
+  return pdfBytes;
 }
