@@ -483,10 +483,7 @@ function generateInvoiceHTML(invoice) {
   `;
 }
 
-// utils/pdfGenerator-simple.js
 import { PDFDocument, rgb } from 'pdf-lib';
-import fontkit from '@pdf-lib/fontkit';
-// Simplified working PDF generator
 async function generateInvoicePDF(invoice) {
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([595.28, 841.89]); // A4
