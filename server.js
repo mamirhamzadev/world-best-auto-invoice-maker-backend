@@ -1,10 +1,11 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import { connectDB } from './config/db.js';
-import customerRoutes from './routes/customers.js'
-import itemsRoutes from './routes/items.js'
-import invoicesRoutes from './routes/invoices.js'
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import { connectDB } from "./config/db.js";
+import customerRoutes from "./routes/customers.js";
+import itemsRoutes from "./routes/items.js";
+import invoicesRoutes from "./routes/invoices.js";
+import settingsRoutes from "./routes/settings.js";
 
 dotenv.config();
 connectDB();
@@ -17,9 +18,11 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Routes
-app.use('/api/customers', customerRoutes);
-app.use('/api/items', itemsRoutes);
-app.use('/api/invoices', invoicesRoutes);
+app.use("/api/customers", customerRoutes);
+app.use("/api/items", itemsRoutes);
+app.use("/api/invoices", invoicesRoutes);
+app.use("/api/settings", settingsRoutes);
+
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -27,7 +30,7 @@ app.use((err, req, res, next) => {
   res.status(statusCode);
   res.json({
     message: err.message,
-    stack: process.env.NODE_ENV === 'production' ? null : err.stack,
+    stack: process.env.NODE_ENV === "production" ? null : err.stack,
   });
 });
 
